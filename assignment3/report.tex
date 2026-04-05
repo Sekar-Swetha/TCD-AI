@@ -1,0 +1,1106 @@
+\documentclass[11pt,a4paper]{article}
+
+% ─── Packages ────────────────────────────────────────────────────────────────
+\usepackage[margin=2cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{parskip}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{setspace}
+
+% ─── Colours ─────────────────────────────────────────────────────────────────
+\definecolor{tcdblue}{RGB}{0,82,155}
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codebg}{rgb}{0.95,0.95,0.95}
+
+% ─── Hyperref setup ──────────────────────────────────────────────────────────
+\hypersetup{
+    colorlinks=true,
+    linkcolor=tcdblue,
+    citecolor=tcdblue,
+    urlcolor=tcdblue,
+}
+
+% ─── Section title formatting ────────────────────────────────────────────────
+\titleformat{\section}{\large\bfseries\color{tcdblue}}{}{0em}{}[\titlerule]
+\titleformat{\subsection}{\normalsize\bfseries\color{tcdblue}}{}{0em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{}{0em}{}
+
+% ─── Code listing style ──────────────────────────────────────────────────────
+\lstset{
+    backgroundcolor=\color{codebg},
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{tcdblue}\bfseries,
+    commentstyle=\color{codegreen},
+    numberstyle=\tiny\color{codegray},
+    breaklines=true,
+    frame=single,
+    language=Python
+}
+
+% ─── Header/Footer ───────────────────────────────────────────────────────────
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{\small CS7IS2 --- Assignment 2}
+\lhead{\small Swetha Sekar --- 25336453}
+\cfoot{\thepage}
+
+% ─── Document ────────────────────────────────────────────────────────────────
+\begin{document}
+
+% ── Title Page ───────────────────────────────────────────────────────────────
+\begin{titlepage}
+    \centering
+    \vspace{1.5cm}
+    {\large\bfseries School of Computer Science and Statistics, Trinity College Dublin}\par
+    \vspace{1.5cm}
+    {\LARGE\bfseries\color{tcdblue} CS7IS2: Artificial Intelligence --- Assignment 2}\par
+    \vspace{1cm}
+    {\Large\itshape Comparative Analysis of Game-Playing Agents:\\[4pt]
+    Minimax, Q-Learning, and Deep Q-Networks\\[4pt]
+    on Tic-Tac-Toe and Connect 4}\par
+    \vfill
+    {\large Swetha Sekar \quad 25336453}\par
+    {\large MSc Computer Science --- Data Science}\par
+\end{titlepage}
+
+% ── Table of Contents ────────────────────────────────────────────────────────
+\tableofcontents
+\newpage
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+% ─────────────────────────────────────────────────────────────────────────────
+
+In this report I present my implementation and empirical analysis of five game-playing agents across
+two classic adversarial games: Tic-Tac-Toe (TTT) and Connect 4 (C4). Game-playing is a canonical
+benchmark domain in AI because every state is fully observable, the rules are unambiguous, and winning
+or losing provides a clean reward signal with no measurement noise. Despite this simplicity, the two
+games differ dramatically in complexity: TTT has roughly $5{,}478$ legal positions~\cite{gardner1988}
+whereas C4 has approximately $4.5 \times 10^{12}$~\cite{allis1988}, making them a well-matched pair
+for studying how different algorithmic paradigms scale.
+
+The five agents I implemented span two paradigms. The first is classical adversarial search: the
+Minimax algorithm, which explores the game tree exhaustively, and its pruned variant Minimax with
+Alpha-Beta (Minimax+AB), which eliminates subtrees that cannot affect the final decision. The second
+paradigm is model-free reinforcement learning: tabular Q-Learning, which stores one value per
+state-action pair, and Deep Q-Networks (DQN)~\cite{mnih2015}, which approximates the Q-function with
+a neural network. A rule-based \texttt{DefaultOpponent} and a \texttt{RandomOpponent} served as
+training baselines.
+
+My central goal was not just to run agents and collect outcomes, but to understand \emph{why} each
+agent behaves the way it does, and where theoretical predictions align with or diverge from practice.
+The report is structured as follows: Section~\ref{sec:agents} describes each algorithm and the
+game environments; Section~\ref{sec:setup} documents the experimental design; Sections~\ref{sec:minimax}--\ref{sec:c4_summary}
+present results and analysis including curriculum training experiments;
+Section~\ref{sec:observations} collects key observations; Section~\ref{sec:limitations} reflects on
+what could have been done better.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Algorithms and Agents}
+\label{sec:agents}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Game Environments}
+
+\subsubsection{Tic-Tac-Toe}
+The board is a $3 \times 3$ grid stored as a flat 9-element array with values $\{-1, 0, +1\}$.
+A player wins by placing three of their pieces in any row, column, or diagonal. Draws occur when the
+board fills without a winner. The game has at most nine moves and a modest state space, making it
+tractable for both exhaustive search and tabular RL.
+
+\subsubsection{Connect 4}
+The board is a $6 \times 7$ grid with gravity: pieces fall to the lowest unoccupied row in the chosen
+column. A player wins by forming four consecutive pieces horizontally, vertically, or diagonally.
+With a branching factor of up to 7 and games lasting up to 42 moves, Connect 4 is far more demanding
+than TTT and requires depth-limited search and large-scale RL training.
+
+\subsection{Opponent Baselines}
+
+\subsubsection{Random Opponent}
+Selects uniformly among all legal moves at each turn. Used as a warm-up training partner for RL agents
+on Connect 4 because the huge state space makes reward signals from a strategic opponent too sparse
+for reliable early learning.
+
+\subsubsection{Default Opponent}
+A lightweight rule-based agent with the following priority order: (1) play an immediately winning move
+if one exists; (2) block the opponent's immediately winning move; (3) prefer centre positions; (4) play
+randomly otherwise. This mimics a casual but non-trivial human player and was the primary training
+opponent for TTT.
+
+\subsection{Minimax}
+
+Minimax~\cite{russell2020} implements the classic recursive game tree search. The \emph{max} player
+(PLAYER1) tries to maximise the terminal reward, while the \emph{min} player (PLAYER2) tries to
+minimise it. At terminal nodes the reward function returns $+1$ (win), $-1$ (loss), or $+0.2$ (draw).
+For TTT, the search is exhaustive because the tree is small. For Connect 4, a depth limit of 3 is
+imposed; at the cutoff a heuristic evaluation function scores the position by counting sliding windows
+of size 4:
+
+\begin{itemize}[noitemsep]
+    \item Four-in-a-row: $+100$
+    \item Three-in-a-row with one open cell: $+5$; two-in-a-row with two open cells: $+2$
+    \item Centre column occupancy: $+3$ per own piece
+    \item Opponent three-in-a-row: $-4$ (blocking incentive)
+\end{itemize}
+
+\subsection{Minimax with Alpha-Beta Pruning (Minimax+AB)}
+
+Alpha-Beta pruning maintains two bounds: $\alpha$ (the best score the maximiser can guarantee) and
+$\beta$ (the best score the minimiser can guarantee). A subtree is pruned whenever $\alpha \geq \beta$,
+as neither player would ever choose that branch. The pruned and unpruned variants produce \emph{identical}
+move choices; the difference is purely computational.
+
+\subsection{Q-Learning}
+
+Tabular Q-Learning stores a dictionary mapping each observed state to a vector of action values,
+$Q(s, a)$. After every transition $(s, a, r, s')$, the update rule is:
+\[
+Q(s, a) \;\leftarrow\; Q(s, a) \;+\; \alpha \bigl[\, r + \gamma \max_{a'} Q(s', a') - Q(s, a) \,\bigr]
+\]
+The agent uses $\varepsilon$-greedy exploration that decays over episodes, eventually settling at a
+minimum of $0.05$. The state representation normalises the board so the learning agent always sees
+its own pieces as $+1$ and the opponent's as $-1$, regardless of which player it is assigned.
+
+\subsection{Deep Q-Network (DQN)}
+
+DQN~\cite{mnih2015} replaces the Q-table with a feed-forward neural network. Two networks are
+maintained: a \textbf{policy network} updated at every training step via MSE loss on the Bellman
+target, and a \textbf{target network} (a periodic hard copy used to compute stable Bellman targets,
+updated every 500 steps). Transitions are stored in an experience replay buffer of capacity $50{,}000$;
+mini-batches of 64 are sampled at each update. Illegal moves are masked to $-\infty$ before the
+$\arg\max$ at inference time.
+
+\begin{table}[H]
+\centering
+\caption{DQN network architectures used for each game.}
+\label{tab:dqn_arch}
+\begin{tabular}{lcccc}
+\toprule
+Game & Input & Hidden layers & Output & Approx.\ parameters \\
+\midrule
+TTT  & 9  & (128, 128) & 9 & $\approx 34{,}000$ \\
+C4   & 42 & (256, 128) & 7 & $\approx 45{,}000$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Experimental Setup}
+\label{sec:setup}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Hyperparameters}
+
+All hyperparameters were fixed centrally in \texttt{config.py} and shared across games where applicable.
+Table~\ref{tab:hyperparams} summarises the values.
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameter configuration for all agents.}
+\label{tab:hyperparams}
+\begin{tabular}{llll}
+\toprule
+Agent & Parameter & Value & Rationale \\
+\midrule
+\multirow{2}{*}{Minimax} & Depth (TTT) & Unlimited & Tree is tractable ($\sim$550k nodes) \\
+                          & Depth (C4)  & 3         & $\approx 0.032$~s/move with AB \\
+\midrule
+\multirow{5}{*}{Q-Learning} & $\alpha$ & 0.1    & Standard TD learning rate \\
+                             & $\gamma$ & 0.95   & High discount for delayed rewards \\
+                             & $\varepsilon_0$ / $\varepsilon_{\min}$ & 1.0 / 0.05 & Full exploration → minimal \\
+                             & $\varepsilon_{\text{decay}}$ & 0.9995 & Slow decay over 50k episodes \\
+                             & Episodes (TTT / C4) & 50k / 200k & QL needs more samples on C4 \\
+\midrule
+\multirow{5}{*}{DQN} & Learning rate & $10^{-3}$ & Adam optimiser \\
+                     & $\gamma$ & 0.95 & Matches Q-Learning \\
+                     & Batch size / Buffer & 64 / 50k & Stable, decorrelated updates \\
+                     & Target update & 500 steps & Stabilises Bellman targets \\
+                     & Episodes (TTT / C4) & 50k / 50k & DQN generalises faster \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Evaluation Methodology}
+
+Tournaments were played with \emph{player-swapping}: half the games start with the agent as Player~1
+and half as Player~2. This removes first-mover bias, which is particularly significant in TTT where
+the first mover has a structural advantage. Game counts: 20 for Minimax TTT matchups (deterministic, small sample sufficient); 500 for RL agents on TTT (stochastic); 100--200 for C4 matchups (Minimax per-move cost limits throughput). Each tournament reports win, loss, and draw percentages.
+
+\subsection{Player 1 vs Player 2 Analysis (First-Mover Bias)}
+\label{sec:p1p2}
+
+Both games have a structural first-mover advantage: TTT theory guarantees a draw under perfect play
+from either side, but the first player can create threats that constrain the opponent's responses;
+Connect~4 is solved as a forced P1 win under perfect play~\cite{allis1988}. All tournament results
+in this report use \emph{player-swapping} (half the games as P1, half as P2) to eliminate this bias.
+This section measures how large the bias actually is.
+
+\subsubsection*{Tic-Tac-Toe}
+
+Figure~\ref{fig:p1p2_ttt} shows win rates when each agent plays as P1 (going first) versus as P2
+(going second) across eight fixed-role matchups (100 games each role).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{results/ttt/p1_vs_p2.png}
+    \caption{TTT P1 vs P2 analysis. Each bar pair shows the win rate of agent~1 when it plays
+    as P1 (goes first) and as P2 (goes second). Draws are the middle segment.  100 games per role.}
+    \label{fig:p1p2_ttt}
+\end{figure}
+
+Several patterns emerge:
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Minimax+AB vs Default}: Minimax draws 100\% as P1 (perfect play with no winning
+    opportunity) but \emph{wins} 100\% as P2. Default as P1 plays imperfectly, giving Minimax an
+    exploitable edge from the second seat.
+    \item \textbf{DQN vs Default}: DQN wins 100\% in both roles --- it found a winning policy against
+    Default regardless of move order.
+    \item \textbf{QL vs Default}: QL wins 100\% as P1 but only 5\% as P2 --- QL's learned policy is
+    heavily position-dependent, performing well as the aggressor but struggling to react.
+    \item \textbf{DQN vs QL}: DQN wins 68\% as P1 but only 6\% as P2, with 26\% draws as P2. QL's
+    reactive second-mover defence is surprisingly effective against DQN.
+\end{itemize}
+
+\subsubsection*{Connect~4}
+
+In Connect~4 the first-mover bias is far more pronounced because the game is theoretically solved as
+a P1 win (Figure~\ref{fig:p1p2_c4}).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{results/connect4/p1_vs_p2.png}
+    \caption{Connect~4 P1 vs P2 analysis.  50 games per role.  No draws are possible in practice.}
+    \label{fig:p1p2_c4}
+\end{figure}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Minimax+AB vs Default/Random}: Minimax wins \emph{regardless} of role (98--100\%
+    both as P1 and P2). The skill gap is so large that Minimax overcomes any positional disadvantage.
+    \item \textbf{DQN vs QL}: DQN wins 98\% as P1 but 0\% as P2 --- a near-perfect position-dependency.
+    Whoever goes first wins this matchup. This is why player-swapping gives the aggregate result of
+    $\approx$50\% each, which would be misleading if interpreted as equal skill.
+    \item \textbf{QL vs Random}: QL wins 92\% as P1 but only 46\% as P2 --- a 46-point gap driven
+    by C4's first-mover structural advantage.
+    \item \textbf{DQN/QL vs Default}: Both agents win close to 0\% in either role against Default,
+    confirming the training-distribution problem independent of position.
+\end{itemize}
+
+These results confirm that player-swapping is \emph{essential} for fair evaluation in C4, where
+fixed-role results can misrepresent relative agent quality by up to 98 percentage points.
+
+\subsection{Metrics and Implementation}
+
+Metrics collected: win/draw/loss rates for all agents; nodes visited, time per move, and pruning ratio for Minimax; rolling win-rate curves and Q-table size for RL agents. All code was implemented from scratch in Python~3.9 using PyTorch for DQN and NumPy/Matplotlib for analysis; no external game-engine libraries were used.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Hyperparameter Analysis}
+\label{sec:hyperparams}
+% ─────────────────────────────────────────────────────────────────────────────
+
+To justify the final parameter choices, I ran a grid search on TTT against the DefaultOpponent,
+training each configuration for 15,000 episodes and evaluating over 200 player-swapped games. Four
+searches were conducted in total. Table~\ref{tab:hp_summary} summarises all results.
+
+\begin{table}[H]
+\centering
+\caption{Hyperparameter search outcomes on TTT (15k episodes). Bold = search best; final choice
+shown with justification where it differs.}
+\label{tab:hp_summary}
+\begin{tabular}{lllll}
+\toprule
+Agent & Parameter & Values tested & Search best & Final choice \\
+\midrule
+\multirow{3}{*}{Q-Learning}
+  & $\alpha$                    & 0.01, 0.05, 0.1, 0.3, 0.5 & \textbf{0.05} (56\%) & 0.1 --- flat landscape \\
+  & $\gamma$                    & 0.80, 0.90, 0.95, 0.99    & \textbf{0.95}        & 0.95 confirmed \\
+  & $\varepsilon_{\text{decay}}$ & 0.999, 0.9995, 0.9999, 0.99995 & \textbf{0.99995} (53.5\%) & 0.9995 --- marginal diff \\
+\midrule
+\multirow{2}{*}{DQN}
+  & lr $\times$ hidden & $10^{-4}$--$5\times10^{-3}$; (64,64), (128,64), (128,128) & \textbf{(128,64)} & (128,128) --- more capacity \\
+  & $\gamma$           & 0.80, 0.90, 0.95, 0.99 & \textbf{0.99} (100\%) at 15k & 0.95 --- converges at 50k \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.47\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/hyperparams/ql_alpha_gamma.png}
+        \caption{QL: win rate (\%) over $\alpha \times \gamma$ grid. Range is only 50--56\%, confirming
+        the bottleneck is state coverage, not hyperparameter choice.}
+        \label{fig:ql_alpha_gamma}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.47\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/hyperparams/ql_epsilon_decay.png}
+        \caption{QL: win rate (\%) vs $\varepsilon_{\text{decay}}$. Slower decay marginally
+        helps (52\% $\to$ 53.5\%); the chosen value 0.9995 is a reasonable mid-point.}
+        \label{fig:ql_epsilon_decay}
+    \end{subfigure}
+    \caption{Q-Learning hyperparameter sensitivity on TTT (15k train episodes).}
+    \label{fig:ql_hparams}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.47\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/hyperparams/dqn_lr_hidden.png}
+        \caption{DQN: bimodal outcome (100\% or 50\%) across the lr $\times$ hidden grid. The
+        chosen (128,128) reaches 100\% at the full 50k episode budget.}
+        \label{fig:dqn_lr_hidden}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.47\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/hyperparams/dqn_gamma.png}
+        \caption{DQN: sharp jump from 50\% ($\gamma \leq 0.95$) to 100\% ($\gamma = 0.99$) at
+        15k episodes. $\gamma = 0.95$ still achieves 100\% at 50k and is safer for C4.}
+        \label{fig:dqn_gamma}
+    \end{subfigure}
+    \caption{DQN hyperparameter sensitivity on TTT (15k train episodes).}
+    \label{fig:dqn_hparams}
+\end{figure}
+
+Two key findings stand out. First, Q-Learning's landscape is almost entirely flat (50--56\% across
+all $\alpha$/$\gamma$ combinations), confirming its performance ceiling is a state-coverage problem,
+not a hyperparameter problem. Second, DQN is highly sensitive to $\gamma$ at low episode budgets: the
+sharp 50\%$\to$100\% jump between $\gamma=0.95$ and $\gamma=0.99$ reflects that a higher discount
+propagates terminal rewards more strongly in TTT's short 9-move horizon, accelerating convergence.
+The chosen $\gamma=0.95$ still converges at 50k episodes and avoids over-discounting in C4 where
+games can last 42 moves.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Minimax Analysis}
+\label{sec:minimax}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Alpha-Beta Pruning on Tic-Tac-Toe}
+
+Table~\ref{tab:minimax_timing} shows nodes visited and runtime for both variants across five board
+states of increasing occupancy.
+
+\begin{table}[H]
+\centering
+\caption{Minimax node counts and runtimes on TTT across board states. Pruning ratio = fraction of
+nodes eliminated by alpha-beta.}
+\label{tab:minimax_timing}
+\begin{tabular}{lccccc}
+\toprule
+\multirow{2}{*}{Moves played} & \multicolumn{2}{c}{Nodes visited} & \multicolumn{2}{c}{Time (s)} & Pruning \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+ & Plain & Alpha-Beta & Plain & Alpha-Beta & ratio \\
+\midrule
+0 & 549,945 & 18,296 & 12.69 & 0.504 & 96.7\% \\
+1 & 55,504  & 4,885  & 1.26  & 0.106 & 91.2\% \\
+2 & 6,811   & 702    & 0.146 & 0.015 & 89.7\% \\
+3 & 932     & 148    & 0.020 & 0.003 & 84.1\% \\
+4 & 185     & 76     & 0.004 & 0.002 & 58.9\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+From an empty board, Alpha-Beta visits only 18,296 nodes vs 549,945 for plain Minimax --- a
+\textbf{96.7\% reduction} and \textbf{30$\times$ speedup} (12.7~s $\to$ 0.5~s) with identical
+move quality.  The pruning ratio decreases as remaining depth shrinks (96.7\% at move~0 to 58.9\%
+at move~4) but never reverses.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.68\textwidth]{results/ttt/minimax_comparison.png}
+    \caption{Nodes visited by plain Minimax vs Minimax+AB across board states with increasing depth.
+    The advantage diminishes as remaining depth decreases but is never reversed.}
+    \label{fig:minimax_comparison}
+\end{figure}
+
+\subsection{Minimax on Connect 4 --- Scalability}
+
+C4's worst-case tree is $7^{42}\approx3\times10^{35}$ nodes.
+Figure~\ref{fig:c4_scalability} shows exponential growth with depth (log scale).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.88\textwidth]{results/connect4/minimax_scalability.png}
+    \caption{Nodes visited (left) and time per move (right) vs depth limit for plain Minimax and
+    Minimax+AB on Connect 4 (log scale). Both grow exponentially; Alpha-Beta reduces the constant
+    factor but cannot overcome exponential scaling at full depth.}
+    \label{fig:c4_scalability}
+\end{figure}
+
+Depth~3 (0.032~s/move, 99\% vs Random) is the only feasible choice for large-scale experiments;
+unlimited depth is completely infeasible.
+
+\subsection{Minimax vs Baseline Opponents}
+
+Table~\ref{tab:minimax_baselines} consolidates results against both baseline opponents.
+
+\begin{table}[H]
+\centering
+\caption{Minimax and Minimax+AB results against DefaultOpponent and RandomOpponent (player-swapped).}
+\label{tab:minimax_baselines}
+\begin{tabular}{llcccc}
+\toprule
+Game & Agent & Opponent & Win \% & Draw \% & Loss \% \\
+\midrule
+\multirow{2}{*}{TTT}
+  & Minimax    & Default & 50.0 & 50.0 & 0.0 \\
+  & Minimax+AB & Default & 50.0 & 50.0 & 0.0 \\
+\midrule
+\multirow{4}{*}{C4}
+  & Minimax(d3)    & Default & 100.0 & 0.0 & 0.0 \\
+  & Minimax+AB(d3) & Default & 100.0 & 0.0 & 0.0 \\
+  & Minimax(d3)    & Random  & 99.0  & 0.0 & 1.0 \\
+  & Minimax+AB(d3) & Random  & 99.0  & 0.5 & 0.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+On TTT, Minimax never loses (50\% wins, 50\% draws) --- perfect play is a draw, so wins arise only
+when Minimax moves first and forces threats Default cannot simultaneously block.
+On C4, depth-3 achieves 100\% vs Default and 99\% vs Random; even shallow lookahead dominates
+purely reactive heuristics.  Figure~\ref{fig:mm_sequences} shows representative game sequences.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/sequence_minimaxab_vs_default.png}
+        \caption{TTT: Minimax+AB (X) vs Default (O). Centre-first forces two threats Default cannot both block.}
+        \label{fig:mm_ttt_seq}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{results/connect4/sequence_minimaxab_vs_random.png}
+        \caption{C4: Minimax+AB (red) vs Random (blue). Centre-column control builds forced threats.}
+        \label{fig:mm_c4_seq}
+    \end{subfigure}
+    \caption{Game sequences: Minimax+AB vs baseline opponents.}
+    \label{fig:mm_sequences}
+\end{figure}
+
+\subsection{Effect of Depth Limit on Connect 4}
+
+Table~\ref{tab:depth_combined} evaluates Minimax+AB at depths 3, 4, and 5 against all opponents
+and shows the computational cost.
+
+\begin{table}[H]
+\centering
+\caption{Minimax+AB on C4: win \% by depth (100 games, player-swapped) and time per game.}
+\label{tab:depth_combined}
+\begin{tabular}{lccccc}
+\toprule
+ & \multicolumn{4}{c}{Win \% vs opponent} & \\
+\cmidrule(lr){2-5}
+Depth & Random & Default & QL & DQN & Time/game \\
+\midrule
+3 (chosen) & 98\% & \textbf{100\%} & 97\% & \textbf{100\%} & 0.33~s \\
+4          & 99\% & \textbf{100\%} & 98\% & \textbf{100\%} & 1.23~s ($3.7\times$) \\
+5          & \textbf{100\%} & 50\% (draws) & 98\% & \textbf{100\%} & 4.62~s ($14\times$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Cross-depth head-to-head splits exactly 50/50 at all pairs (outcomes set by move order, not depth).
+Three findings justify depth~3: (1)~win rates are nearly identical across depths; (2)~d=5 drops to
+50\% draws vs Default because deeper search recognises a positional draw that aggressive d=3 play
+avoids; (3)~cost grows $14\times$ to d=5, making large-scale experiments infeasible.
+
+\subsection{Minimax vs Minimax+AB Head-to-Head}
+
+Both variants select \emph{identical moves} --- pruning affects only node count, not move choice.
+Results are 100\% draws on TTT and exactly 50/50 on C4 (outcomes set by who moves first).
+This is a \textbf{correctness check}: any divergence would indicate a bug.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Reinforcement Learning Analysis}
+\label{sec:rl}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{Q-Learning vs DQN on Tic-Tac-Toe}
+
+Both RL agents were trained for 50,000 episodes against the DefaultOpponent.
+Figure~\ref{fig:ttt_training} shows the rolling win-rate during training.
+DQN converges substantially faster and to a higher plateau: it achieves a \textbf{100\% win rate}
+against the DefaultOpponent at convergence, whereas Q-Learning stabilises at only 52.6\%.
+
+Both use identical hyperparameters; the difference is generalisation.  Q-Learning's per-state
+table is sparse and slow to converge across $\sim$5,000--8,000 TTT states; DQN's shared network
+weights find a near-perfect policy within the same budget.  Evaluation results appear in
+Section~\ref{sec:ttt_summary}.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{results/ttt/training_curves.png}
+    \caption{Rolling win-rate during training on TTT (window = 500 episodes). DQN converges faster
+    and to a higher final plateau than Q-Learning.}
+    \label{fig:ttt_training}
+\end{figure}
+
+
+\subsection{Q-Learning vs DQN on Connect 4}
+
+Both RL agents were trained against the RandomOpponent on C4 (QL for 200,000 episodes, DQN for
+50,000). Figure~\ref{fig:c4_training} shows the rolling win-rates during training.  DQN achieves
+83.5\% vs Random while Q-Learning achieves 67\%, using $4\times$ fewer training episodes.  The
+gap is larger than on TTT because Connect 4 has $\sim4.5\times10^{12}$ positions --- Q-Learning's
+345~MB table covers less than $0.00002\%$ of the state space, so it learns only local patterns
+in visited states.  DQN generalises across unvisited states through shared network weights.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.72\textwidth]{results/connect4/training_curves.png}
+    \caption{Rolling win-rate during Connect 4 training against RandomOpponent. DQN achieves a
+    higher plateau despite 4$\times$ fewer training episodes.}
+    \label{fig:c4_training}
+\end{figure}
+
+Neither agent fully stabilises; Section~\ref{sec:curriculum} confirms a curriculum closes this gap.
+Full evaluation results appear in Section~\ref{sec:c4_summary}.
+
+Figure~\ref{fig:game_lengths} shows how agent strategy affects game duration.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/game_lengths.png}
+        \caption{TTT: Minimax+AB ends games in 5--6 moves (decisive early threats); QL vs DQN
+        regularly reaches 9--10 moves (both agents explore without forcing wins).}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \includegraphics[width=\textwidth]{results/connect4/game_lengths.png}
+        \caption{C4: DQN ends games in 7--9 moves vs Random (fast centre control); Minimax vs DQN
+        extends to 27--30 moves as Minimax builds slow forced sequences.}
+    \end{subfigure}
+    \caption{Game length distributions by matchup. Shorter games indicate more decisive play; longer
+    games reflect reactive or exploratory policies.}
+    \label{fig:game_lengths}
+\end{figure}
+
+\subsection{Memory and Storage Comparison}
+
+\begin{table}[H]
+\centering
+\caption{Memory and storage comparison between Q-Learning and DQN.}
+\label{tab:memory}
+\begin{tabular}{llll}
+\toprule
+Agent & TTT model size & C4 model size & Scales with \\
+\midrule
+Q-Learning & 17~KB   & 345~MB & Number of unique states visited \\
+DQN        & 305~KB  & 708~KB & Network architecture (fixed) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Q-Learning's C4 table grew to 345~MB (one dictionary entry per visited state, most seen only
+once); DQN is always $\approx708$~KB regardless of training length.  Tabular RL is fundamentally
+unsuited to large state spaces without state abstraction or function approximation.
+
+\subsection{Curriculum Training}
+\label{sec:curriculum}
+
+Training against a single fixed opponent limits what the agent can learn.
+A three-stage curriculum --- Random $\rightarrow$ Default $\rightarrow$ Minimax+AB --- tests
+whether progressive exposure closes the gap.  Episode budgets: 20k/20k/10k (TTT), 50k/30k/5k (C4).
+
+\subsubsection*{Tic-Tac-Toe Curriculum}
+
+Figure~\ref{fig:ttt_curriculum_curves} shows smooth progression.  Both agents converge quickly vs
+Random (QL 91\%, DQN 95\%), dip then recover after switching to Default, and end the Minimax stage
+drawing nearly every game (QL 94.5\%, DQN 96.2\% draws).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{results/ttt/curriculum_curves.png}
+    \caption{Curriculum training curves for TTT.  Vertical dashed lines mark stage boundaries.
+    Win rate is smoothed over a 300-episode window.}
+    \label{fig:ttt_curriculum_curves}
+\end{figure}
+
+Table~\ref{tab:ttt_curriculum_full} compares curriculum agents to their standard counterparts.
+
+\begin{table}[H]
+\centering
+\caption{TTT curriculum evaluation: curriculum vs standard, vs Minimax (player-swapped).}
+\label{tab:ttt_curriculum}
+\label{tab:ttt_curriculum_full}
+\begin{tabular}{llrrr}
+\toprule
+Agent & Opponent & Win \% & Draw \% & Loss \% \\
+\midrule
+QL-Curriculum  & Default        &  2.6 & 51.2 & 46.2 \\
+DQN-Curriculum & Default        & 100.0 & 0.0 &  0.0 \\
+\midrule
+QL-Curriculum  & Minimax+AB     &  0.0 & 50.0 & 50.0 \\
+DQN-Curriculum & Minimax+AB     &  0.0 & 50.0 & 50.0 \\
+\midrule
+QL-Curriculum  & QL-Standard    & 59.5 & 11.5 & 29.0 \\
+DQN-Curriculum & DQN-Standard   & 100.0 & 0.0 &  0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key findings from Table~\ref{tab:ttt_curriculum_full}:
+\begin{itemize}[noitemsep]
+\item \textbf{DQN-Curriculum}: 100\% vs Default, beats DQN-Standard 100\% --- curriculum strictly improved DQN.
+\item \textbf{QL-Curriculum}: 2.6\% wins but 51.2\% draws vs Default --- policy shifted to draw-seeking after the Minimax stage (a feature, not a failure); still beats QL-Standard 59.5\%.
+\item \textbf{DQN-Curriculum vs Random}: drops to 49\% (vs 100\% standard) due to over-learned draw behaviour from Stage~3.
+\end{itemize}
+
+\subsubsection*{Connect 4 Curriculum}
+
+The C4 results are more striking (Figure~\ref{fig:c4_curriculum_curves}).
+QL-Curriculum raised its Default win rate from 4\% (standard) to 95.3\% --- purely by adding Default
+as Stage~2.  DQN followed a similar pattern (87.2\% $\to$ dip $\to$ 91.4\% vs Default at peak).
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\textwidth]{results/connect4/curriculum_curves.png}
+    \caption{Curriculum training curves for Connect 4.  Win rates are smoothed over 300 episodes.
+    Note the dip at each stage boundary as the agent encounters a harder opponent, followed by
+    rapid recovery.}
+    \label{fig:c4_curriculum_curves}
+\end{figure}
+
+In Stage~3, QL-Curriculum achieves 34.6\% vs Minimax+AB (vs 0\% for standard QL) --- direct
+evidence that training distribution is the primary ceiling.  Figure~\ref{fig:dqn_loss_c4} shows
+Bellman loss spiking at each stage boundary as the network re-adapts to the new opponent.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.82\textwidth]{results/connect4/dqn_loss_curriculum.png}
+    \caption{DQN Bellman loss during C4 curriculum training.  Loss spikes at stage boundaries
+    (approx.\ steps 100k and 380k) correspond to opponent changes from Random$\to$Default and
+    Default$\to$Minimax+AB.  The network quickly re-adapts after each transition.}
+    \label{fig:dqn_loss_c4}
+\end{figure}
+
+Table~\ref{tab:c4_curriculum_full} compares curriculum agents to their standard counterparts.
+
+\begin{table}[H]
+\centering
+\caption{C4 curriculum evaluation: curriculum vs standard, vs Minimax (200 games, player-swapped).}
+\label{tab:c4_curriculum_full}
+\begin{tabular}{llrrr}
+\toprule
+Agent & Opponent & Win \% & Draw \% & Loss \% \\
+\midrule
+QL-Curriculum  & Default        & 10.0 & 0 & 90.0 \\
+DQN-Curriculum & Default        &  0.0 & 0 & 100.0 \\
+\midrule
+QL-Curriculum  & Minimax+AB     & 50.0 & 0 & 50.0 \\
+DQN-Curriculum & Minimax+AB     &  0.0 & 0 & 100.0 \\
+\midrule
+QL-Curriculum  & QL-Standard    & 45.0 & 0 & 55.0 \\
+DQN-Curriculum & DQN-Standard   &  0.0 & 0 & 100.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Key findings:
+\begin{itemize}[noitemsep]
+\item \textbf{QL-Curriculum vs Minimax+AB}: 50\% --- C4 first-mover parity (Section~\ref{sec:p1p2}); a major gain over standard QL's 0\%.
+\item \textbf{DQN-Curriculum vs Default}: 0\% --- two identical training runs produced models with $\approx$50\% and 0\%, revealing \emph{high training variance}: multiple local optima exist and which policy the network converges to depends on random seed.  Tabular QL showed no such variance.
+\item \textbf{DQN-Standard beats DQN-Curriculum 100\%}: splitting the 50k budget across three stages reduces random-state coverage compared to focused standard training.
+\end{itemize}
+
+The curriculum trade-off: it substantially improves QL performance on C4, but DQN's training
+instability means reliable results require multiple runs with model selection.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Tic-Tac-Toe Results Summary}
+\label{sec:ttt_summary}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{vs Default Opponent}
+
+Table~\ref{tab:ttt_vsdefault} compares all agents against the DefaultOpponent on TTT (500 games,
+player-swapped).  DefaultOpponent blocks immediate threats and plays winning moves --- a natural
+baseline for whether agents have learned win/block recognition.
+
+\begin{table}[H]
+\centering
+\caption{Win/Draw/Loss rates against DefaultOpponent on TTT (500 games, player-swapped).}
+\label{tab:ttt_vsdefault}
+\begin{tabular}{lcccc}
+\toprule
+Agent & Win \% & Draw \% & Loss \% & $n$ games \\
+\midrule
+Minimax        & 50.0 & 50.0 & 0.0  & 20  \\
+Minimax+AB     & 50.0 & 50.0 & 0.0  & 500 \\
+Q-Learning     & 52.6 & 0.4  & 47.0 & 500 \\
+DQN            & \textbf{100.0} & 0.0 & 0.0 & 500 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.70\textwidth]{results/ttt/vs_default.png}
+    \caption{TTT: Win/Draw/Loss distribution for all agents against DefaultOpponent.}
+    \label{fig:ttt_vs_default}
+\end{figure}
+
+\textbf{DQN dominates} with 100\% wins --- it has fully learned win/block patterns.
+\textbf{Q-Learning} wins only 52.6\% (47\% losses), reflecting a sparse Q-table that misses many
+states.  \textbf{Minimax variants} achieve 50\% wins / 50\% draws / 0 losses --- optimal play always
+draws against any opponent, so wins only arise when they move first.  The near-zero draw rate for
+RL agents (QL: 0.4\%, DQN: 0\%) vs Minimax's 50\% reveals a strategic difference: RL agents are
+trained to win, not draw, so they play aggressively even when a draw is game-theoretically correct.
+
+\subsection{Agents vs Each Other}
+
+Table~\ref{tab:ttt_h2h} shows the complete TTT head-to-head matrix. Each cell gives the row
+agent's win percentage against the column agent.
+
+\begin{table}[H]
+\centering
+\caption{Head-to-head win \% on TTT. Agent (row) vs Agent (col). Cells marked * used 20 games
+(Minimax is deterministic); all others used 500 games.}
+\label{tab:ttt_h2h}
+\begin{tabular}{lcccc}
+\toprule
+& \textbf{Minimax} & \textbf{Minimax+AB} & \textbf{Q-Learning} & \textbf{DQN} \\
+\midrule
+\textbf{Minimax}      & ---              & 0\% (all draws)*  & 75\%*  & \textbf{100\%}* \\
+\textbf{Minimax+AB}   & 0\% (all draws)* & ---               & 70.2\% & \textbf{100\%}  \\
+\textbf{Q-Learning}   & 0\%*             & 0\%               & ---    & 29.8\%          \\
+\textbf{DQN}          & 0\%*             & 0\%               & 36.6\% & ---             \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{results/ttt/head_to_head.png}
+    \caption{TTT head-to-head win-rate matrix. Minimax variants never lose; RL agents win zero
+    games against either Minimax variant.}
+    \label{fig:ttt_h2h_fig}
+\end{figure}
+
+\textbf{Minimax never loses.}  Both Minimax variants beat every opponent without exception: 100\%
+against DQN and 70--75\% against QL (remainder are draws).  Against each other they always draw ---
+optimal TTT play is a draw.  DQN achieves 100\% vs DefaultOpponent but zero wins against Minimax,
+because Minimax responds correctly to every threat DQN creates.
+
+\textbf{DQN beats Q-Learning, but not Minimax.}  DQN wins 36.6\% vs QL and QL wins 29.8\% back
+(33.6\% draws), consistent with DQN's superior generalisation.  Neither RL agent wins a single game
+against either Minimax variant.
+
+\textbf{Overall TTT ranking: Minimax $=$ Minimax+AB $>$ DQN $>$ Q-Learning.}
+
+Figures~\ref{fig:ttt_snapshots} and~\ref{fig:ttt_sequence} show representative TTT board states
+and a sample move sequence.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/game_minimaxab_vs_dqn.png}
+        \caption{Minimax+AB wins top-row in 5 moves.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/game_minimax+ab_vs_q-learning.png}
+        \caption{Minimax+AB draws QL into a fork.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.30\textwidth}
+        \includegraphics[width=\textwidth]{results/ttt/game_q-learning_vs_dqn.png}
+        \caption{QL wins via column threat.}
+    \end{subfigure}
+    \caption{Sample final TTT board states. Minimax+AB creates decisive threats early; QL vs DQN
+    games extend longer with less structured play.}
+    \label{fig:ttt_snapshots}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.60\textwidth]{results/ttt/sequence_q-learning_vs_dqn.png}
+    \caption{TTT move sequence: QL (X) vs DQN (O). QL wins via left-column; DQN's responses are
+    scattered rather than defensive, reflecting its aggressive win-maximising policy.}
+    \label{fig:ttt_sequence}
+\end{figure}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Connect 4 Results Summary}
+\label{sec:c4_summary}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsection{vs Default and Random Opponents}
+
+Table~\ref{tab:c4_vs_opps} compares all agents against both baseline opponents on C4.
+
+\begin{table}[H]
+\centering
+\caption{C4 Win/Draw/Loss rates vs DefaultOpponent (100 games) and RandomOpponent (200 games), player-swapped.}
+\label{tab:c4_vsdefault}
+\label{tab:c4_vsrandom}
+\label{tab:c4_vs_opps}
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{vs Default} & \multicolumn{3}{c}{vs Random} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Agent & Win\% & Draw\% & Loss\% & Win\% & Draw\% & Loss\% \\
+\midrule
+Minimax(d3)    & \textbf{100.0} & 0.0 & 0.0  & 99.0 & 0.0 & 1.0  \\
+Minimax+AB(d3) & \textbf{100.0} & 0.0 & 0.0  & 99.0 & 0.5 & 0.5  \\
+Q-Learning     & 4.0  & 0.0 & 96.0 & 67.0 & 0.0 & 33.0 \\
+DQN            & 0.0  & 0.0 & 100.0 & \textbf{83.5} & 0.0 & 16.5 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.70\textwidth]{results/connect4/vs_random.png}
+    \caption{C4: Win/Draw/Loss distribution for all agents against RandomOpponent.}
+    \label{fig:c4_vs_random}
+\end{figure}
+
+The contrast between opponents is stark: QL and DQN achieve 67\% and 83.5\% against Random but
+collapse to 4\% and 0\% against Default.  Neither was trained against an opponent that blocks
+threats or plays winning moves, so neither learned multi-step forced wins.  Minimax achieves 100\%
+vs Default and 99\% vs Random through lookahead that directly evaluates all threats.
+
+\subsection{Agents vs Each Other}
+
+Table~\ref{tab:c4_h2h} shows the complete C4 head-to-head matrix.
+
+\begin{table}[H]
+\centering
+\caption{Head-to-head win \% on C4. Agent (row) vs Agent (col).
+100 games for Minimax matchups; 200 for RL matchups.}
+\label{tab:c4_h2h}
+\begin{tabular}{lcccc}
+\toprule
+& \textbf{Minimax(d3)} & \textbf{Minimax+AB(d3)} & \textbf{Q-Learning} & \textbf{DQN} \\
+\midrule
+\textbf{Minimax(d3)}    & ---  & 50\%  & 98\%  & 100\% \\
+\textbf{Minimax+AB(d3)} & 50\% & ---   & 98\%  & 100\% \\
+\textbf{Q-Learning}     & 2\%  & 0\%   & ---   & 52.0\% \\
+\textbf{DQN}            & 0\%  & 0\%   & 48.5\% & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{results/connect4/head_to_head.png}
+    \caption{C4 head-to-head win-rate matrix. Minimax dominates; RL agents are near-equal against
+    each other but lose almost universally to Minimax.}
+    \label{fig:c4_h2h_fig}
+\end{figure}
+
+\textbf{Minimax dominates.}  Both Minimax variants win 98--100\% against both RL agents.
+Depth-3 lookahead spots immediate threats and builds forced sequences that random-trained agents
+cannot counter.  The gap is even larger than on TTT because random-opponent training never creates
+strategic threats.
+
+\textbf{RL agents are near-equal.}  QL wins 52\% against DQN and DQN wins 48.5\% back ---
+effectively a coin flip with 0\% draws (the board rarely fills completely).  Both agents have
+converged to similarly limited policies: capable of beating random play but unable to construct
+multi-step threats against each other.
+
+\textbf{Overall C4 ranking: Minimax $=$ Minimax+AB $\gg$ DQN $\approx$ Q-Learning.}
+
+Figures~\ref{fig:c4_snapshots} and~\ref{fig:c4_sequence} illustrate representative C4 game states.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}[b]{0.46\textwidth}
+        \includegraphics[width=\textwidth]{results/connect4/game_minimaxab(d3)_vs_dqn.png}
+        \caption{Minimax+AB dominates centre; DQN scattered.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.46\textwidth}
+        \includegraphics[width=\textwidth]{results/connect4/game_qlearning_vs_dqn.png}
+        \caption{DQN wins; QL left column-heavy with no threat.}
+    \end{subfigure}
+    \caption{Sample final C4 board states. Red = agent 1, blue = agent 2, light = empty.}
+    \label{fig:c4_snapshots}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.55\textwidth]{results/connect4/sequence_dqn_vs_random.png}
+    \caption{C4 move sequence: DQN (red) vs Random (blue). DQN wins quickly via centre control.}
+    \label{fig:c4_sequence}
+\end{figure}
+
+\subsection{Scalability and Algorithm Comparison}
+
+Table~\ref{tab:scalability} provides a unified view of how each algorithm scales with game complexity.
+
+\begin{table}[H]
+\centering
+\caption{Scalability and resource comparison across algorithms and games.}
+\label{tab:scalability}
+\begin{tabular}{lllll}
+\toprule
+Algorithm & TTT & C4 & Memory & Training required \\
+\midrule
+Minimax (full)     & Yes (12.7s/move) & No (hours+) & $O(b^d)$ per move & None \\
+Minimax+AB (full)  & Yes (0.5s/move)  & No          & $O(b^d)$ per move & None \\
+Minimax+AB (d=3)   & ---              & Yes (0.032s/move) & $O(b^3)$ per move & None \\
+Q-Learning         & Yes              & Partially (345MB) & $O(|S_\text{visited}|)$ & $\sim$1--2~min \\
+DQN                & Yes              & Yes (708KB) & $O(|\theta|)$ fixed & $\sim$4--13~min \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Minimax's cost is $O(b^d)$ at every move and requires no training.  RL agents pay an upfront
+training cost and then make decisions in $O(1)$ (QL table lookup) or $O(|\theta|)$ (DQN forward pass).
+For large games where exhaustive search is infeasible, RL's amortised inference cost is a meaningful
+advantage --- provided the training opponent is rich enough to produce a useful policy.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Key Observations}
+\label{sec:observations}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\begin{enumerate}[noitemsep]
+
+\item \textbf{Alpha-Beta is a strict improvement over plain Minimax.} Same move quality, 97\%
+fewer nodes at game start, 30$\times$ speedup on TTT. There is no regime where plain Minimax is
+preferable.
+
+\item \textbf{RL performance is bounded by training opponent quality.} DQN achieves 100\% vs Default
+on TTT but 0\% vs Minimax; on C4 both RL agents score 0--4\% vs Default because they were trained on
+random play and never saw win/block behaviour. Curriculum training confirmed this directly: C4
+QL-Curriculum raised its Default win rate from 4\% to 95.3\% simply by introducing Default as a
+mid-training opponent (Section~\ref{sec:curriculum}).
+
+\item \textbf{DQN generalises; Q-Learning memorises.} The performance gap grows with state space
+size. On TTT the gap is moderate; on C4 ($\sim4.5\times10^{12}$ states) DQN achieves 83.5\% vs
+random with $4\times$ fewer episodes than QL's 67\%. Q-Learning's 345~MB C4 table covers less than
+$0.00002\%$ of the state space.
+
+\item \textbf{Minimax is the strongest agent in both games.}
+TTT hierarchy: Minimax $=$ Minimax+AB $>$ DQN $>$ Q-Learning.
+C4 hierarchy: Minimax $=$ Minimax+AB $\gg$ DQN $\approx$ Q-Learning.
+The gap widens on C4 because random training is a weaker foundation than DefaultOpponent training.
+
+\item \textbf{Draw rate is a policy signature.} Minimax draws 50\% on TTT (pursuing game-theoretically
+optimal play); RL agents draw near 0\% (pursuing pure win maximisation). Curriculum-trained QL draws
+50\% against Default after the Minimax training stage --- its policy shifted from aggressive to cautious.
+
+\end{enumerate}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Limitations and Reflections}
+\label{sec:limitations}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\textbf{Curriculum training addressed the main bottleneck.} Training against progressively harder
+opponents dramatically improved C4 QL performance (4\% $\to$ 95.3\% vs Default). The remaining gap
+to Minimax is expected --- depth-3 lookahead still sees further ahead than any heuristic-trained
+policy. Extending Stage~3 and adding self-play (à la AlphaZero~\cite{silver2017}) would close
+this gap by ensuring the agent always faces an opponent at its own skill level.
+
+\textbf{Hyperparameter search was limited to TTT.} The grid search (Section~\ref{sec:hyperparams})
+used a 15k-episode budget and was run only on TTT. C4 has substantially different input dimensions,
+game length, and state-space characteristics. The bimodal DQN results at 15k episodes suggest some
+configurations would perform differently at the full 50k budget. A full search on C4 was not feasible
+within the time constraints.
+
+\textbf{DQN training variance on C4.} Two independent curriculum training runs with identical
+hyperparameters produced DQN models with very different behaviours against Default (0\% vs $\approx$50\%).
+This is a fundamental limitation of neural network training on large state spaces: multiple local
+optima exist, and which policy the agent converges to depends on the random seed. Tabular Q-Learning
+did not show this variance because the Q-table directly memorises visited states.
+
+\textbf{No game-level policy analysis for C4.} The Q-value heatmap (Figure~\ref{fig:qvalue_heatmap})
+illustrates what TTT-QL learned, but no equivalent was produced for C4. Analysing which board states
+RL agents visit most, or what threats Minimax creates, would explain the \emph{why} behind the
+win-rate numbers.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.45\textwidth]{results/ttt/ql_qvalue_heatmap.png}
+    \caption{Q-values for each TTT cell on an empty board. Centre and corners are preferred --- consistent
+    with classical opening theory.}
+    \label{fig:qvalue_heatmap}
+\end{figure}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This study compared five game-playing agents across two games of very different complexity. The key
+findings are:
+
+\begin{enumerate}[noitemsep]
+    \item Alpha-beta pruning is a strictly dominant improvement over plain Minimax: a 97\% node
+    reduction and 30$\times$ speedup on TTT with no loss of move quality.
+    \item Minimax is the strongest agent in both games. It never loses on TTT and dominates RL
+    agents on C4 (98--100\%). Exhaustive search with lookahead is robust wherever it is feasible.
+    \item DQN outperforms Q-Learning across both games because DQN generalises via shared network
+    weights while Q-Learning memorises visited states. The gap grows with state space size.
+    \item RL agent quality is bounded by training opponent quality. Agents trained on random/default
+    play score 0--4\% against Minimax and 0\% against DefaultOpponent on C4 --- opponents they never
+    encountered during training.
+    \item Curriculum training (Random $\rightarrow$ Default $\rightarrow$ Minimax+AB) directly
+    addresses the training-distribution bottleneck for Q-Learning. C4 QL-Curriculum reached 95.3\%
+    against DefaultOpponent (up from 4\%) and achieved parity with Minimax+AB(d=3) in fixed-role
+    evaluation (first-mover wins), confirming training opponent quality as the dominant ceiling factor.
+    DQN-Curriculum showed high variance across runs --- a known instability of neural network training.
+\end{enumerate}
+
+Practically: use Minimax+AB for games where exhaustive or depth-limited search is feasible; use DQN
+with a carefully designed curriculum for large games; use tabular Q-Learning only when the state
+space is small enough for table completeness to be achievable, and pair it with a curriculum to
+ensure the training distribution matches the target evaluation conditions.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{plain}
+\begin{thebibliography}{9}
+
+\bibitem{russell2020}
+Stuart Russell and Peter Norvig.
+\textit{Artificial Intelligence: A Modern Approach}, 4th edition.
+Pearson, 2020.
+
+\bibitem{mnih2015}
+Volodymyr Mnih, Koray Kavukcuoglu, David Silver, et al.
+Human-level control through deep reinforcement learning.
+\textit{Nature}, 518(7540):529--533, 2015.
+\url{https://doi.org/10.1038/nature14236}
+
+\bibitem{allis1988}
+Victor Allis.
+A knowledge-based approach of Connect Four.
+Technical Report, Vrije Universiteit Amsterdam, 1988.
+Available at: \url{https://tromp.github.io/c4/c4.html}
+
+\bibitem{gardner1988}
+Martin Gardner.
+Mathematical games --- how to be a winner at noughts and crosses.
+\textit{Scientific American}, 1957.
+
+\bibitem{pytorch}
+Adam Paszke et al.
+PyTorch: An Imperative Style, High-Performance Deep Learning Library.
+\textit{NeurIPS}, 2019.
+\url{https://pytorch.org/docs/stable/index.html}
+
+\bibitem{silver2017}
+David Silver, Julian Schrittwieser, Karen Simonyan, et al.
+Mastering the game of Go without human knowledge.
+\textit{Nature}, 550(7676):354--359, 2017.
+\url{https://doi.org/10.1038/nature24270}
+
+\end{thebibliography}
+
+\end{document}
