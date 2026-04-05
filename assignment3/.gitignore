@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+
+models/
+*.pkl
+*.pt
+
+*.csv
+
+*.png
+*.jpg
+*.jpeg
+*.pdf
